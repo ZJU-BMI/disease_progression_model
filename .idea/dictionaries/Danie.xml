@@ -2,6 +2,7 @@
   <dictionary name="Danie">
     <words>
       <w>unnormalized</w>
+      <w>viterbi</w>
     </words>
   </dictionary>
 </component>
