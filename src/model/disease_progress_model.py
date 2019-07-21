@@ -439,16 +439,16 @@ class DiseaseProgressionModel(object):
         j, k = visit_id, subtype
         log_q = 0
 
-        if j == len(trajectory):
+        if j == len(trajectory)-1:
             return 1
 
-        # forward procedure path
+        # backward procedure path
         for l_ in range(self.__K):
             # constraint
             if self.__Theta[k, l_] == 0:
                 continue
 
-            log_p = self.__calculate_part_3(trajectory, j, l_)
+            log_p = self.__calculate_part_3(trajectory, j+1, l_)
 
             current_sum = cache[-1][l_] + log(self.__Theta[k, l_]) + log_p
 
@@ -461,7 +461,7 @@ class DiseaseProgressionModel(object):
                     log_q = current_sum + log(1 + exp(log_q - current_sum))
 
             if log_q > 0:
-                continue
+                raise ValueError('')
         return log_q
 
     def __forward_procedure(self, trajectory, terminate_idx):
@@ -477,7 +477,7 @@ class DiseaseProgressionModel(object):
 
     def __backward_procedure(self, trajectory, start_idx):
         backward_cache = list()
-        for visit_index in range(start_idx, len(trajectory)+1).__reversed__():
+        for visit_index in range(start_idx, len(trajectory)).__reversed__():
             a_ij = list()
             for patient_subtype in range(self.__K):
                 a_ijk = self.__backward_calculate_part_2(trajectory, backward_cache, visit_index, patient_subtype)
@@ -594,7 +594,7 @@ class DiseaseProgressionModel(object):
         phi = self.__Phi
         risk_tier_list = list()
         for trajectory in document:
-            # hidden state inference procedure
+            # hidden state inference procedure, Follow Eq.34
             if visit_idx == -1:
                 idx = len(trajectory)-1
             else:
@@ -630,7 +630,7 @@ class DiseaseProgressionModel(object):
                     for r in range(self.__R):
                         denominator_obs = 1
                         for n_ in range(len(trajectory[idx])):
-                            denominator_obs *= phi[hidden_state, risk_tier, trajectory[idx][n_]]
+                            denominator_obs *= phi[hidden_state, r, trajectory[idx][n_]]
                         denominator_r = denominator_obs * pi[hidden_state, r]
                         denominator += denominator_r
                     prob_sum += numerator/denominator*hidden_state_prob
@@ -815,7 +815,7 @@ def synthetic_data_generator(num_trajectory, max_visit, min_visit, max_observati
 
 def save_risk_tier_assignment(estimated_list, index_patient_dict, folder_path):
     data_to_write = list()
-    head = ['patient_id', 'visit_index']
+    head = ['patient_id']
     for i, _ in enumerate(estimated_list[0]):
         head.append('risk tier {}'.format(i+1))
     data_to_write.append(head)
@@ -857,7 +857,7 @@ def unit_test():
     disease_progression_model = DiseaseProgressionModel(document, alpha=alpha, beta=beta, gamma=gamma,
                                                         num_risk_tier=risk_tier, num_subtype=patient_subtype)
 
-    disease_progression_model.optimization(40)
+    disease_progression_model.optimization(50)
     estimated_risk_list = disease_progression_model.risk_tier_inference(document)
     estimated_state_list = disease_progression_model.disease_state_assignment(document)
 
