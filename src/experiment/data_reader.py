@@ -8,7 +8,7 @@ def data_reader(file_path):
     index_patient_dict = dict()
     medical_data = dict()
     with open(file_path, 'r', encoding='gbk', newline='') as csv_file:
-        csv_reader= csv.reader(csv_file)
+        csv_reader = csv.reader(csv_file)
         head_flag = True
         for line in csv_reader:
             if head_flag:
@@ -42,4 +42,3 @@ if __name__ == "__main__":
     print(path)
     data_reader(path)
     print('accomplish')
-
