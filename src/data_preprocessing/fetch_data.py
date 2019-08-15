@@ -6,7 +6,7 @@ from itertools import islice
 import datetime
 
 
-def get_valid_visit(data_path_dict, cache_root, read_from_cache=False, truncate_year=2009):
+def get_valid_visit(data_path_dict, cache_root, truncate_year, read_from_cache=False):
     """
     条件
     1.入院时间自2009年1月1日起算
@@ -19,6 +19,7 @@ def get_valid_visit(data_path_dict, cache_root, read_from_cache=False, truncate_
     :param data_path_dict:
     :param cache_root:
     :param read_from_cache:
+    :param truncate_year:
     :return: 一个<Patient_ID, [Visit_ID, ..., Visit_ID]>结构的有效表格
     """
 
@@ -91,7 +92,7 @@ def get_valid_visit(data_path_dict, cache_root, read_from_cache=False, truncate_
             patient_id = line[0]
             sex = line[4]
             birthday = line[5]
-            if not (sex == ''  or len(birthday) < 6):
+            if not (sex == '' or len(birthday) < 6):
                 demographic_info_available_set.add(patient_id)
     # 删减掉没有人口学信息的病人
     demographic_info_unavailable_set = set()
@@ -164,6 +165,7 @@ def get_valid_visit(data_path_dict, cache_root, read_from_cache=False, truncate_
         csv_writer.writerows(data_to_write)
 
     return visit_dict
+
 
 def get_visit_info(visit_dict, data_path_dict, cache_root, read_from_cache=False):
     """
@@ -270,6 +272,7 @@ def get_visit_info(visit_dict, data_path_dict, cache_root, read_from_cache=False
         csv.writer(file).writerows(data_to_write)
     return visit_info_dict
 
+
 def get_procedure(visit_dict, data_path_dict, map_path, cache_root, read_from_cache=False):
     """
     返回病人每一次入院的手术信息
@@ -341,6 +344,7 @@ def get_procedure(visit_dict, data_path_dict, map_path, cache_root, read_from_ca
         csv.writer(file).writerows(data_to_write)
 
     return operation_dict
+
 
 def get_medical_info(visit_dict, data_path_dict, map_path, cache_root, read_from_cache=False):
     """
@@ -465,6 +469,7 @@ def get_medical_info(visit_dict, data_path_dict, map_path, cache_root, read_from
 
     return drug_dict
 
+
 def get_vital_sign(visit_dict, data_path_dict, cache_root, read_from_cache=False):
     if read_from_cache:
         vital_sign_dict = dict()
@@ -541,6 +546,7 @@ def get_vital_sign(visit_dict, data_path_dict, cache_root, read_from_cache=False
     with open(cache_path, 'w', encoding='gbk', newline='') as file:
         csv.writer(file).writerows(data_to_write)
     return vital_sign_dict
+
 
 def get_demographic_info(visit_dict, data_path_dict, cache_root, read_from_cache=False):
     """
@@ -637,6 +643,7 @@ def get_demographic_info(visit_dict, data_path_dict, cache_root, read_from_cache
 
     return sex_dict_return, age_dict_return
 
+
 def get_diagnosis_info(visit_dict, data_path_dict, map_path, cache_root, read_from_cache=False):
     """
     返回病人每次入院的主诊断和其它诊断
@@ -712,12 +719,12 @@ def get_diagnosis_info(visit_dict, data_path_dict, map_path, cache_root, read_fr
         csv.writer(file).writerows(data_to_write)
     return diagnosis_dict
 
+
 def get_cardiac_dysfunction_info(visit_dict, data_path_dict, cache_root, read_from_cache=False):
     """
     返回病人每次入院的心功能不全分级
     :param visit_dict:
     :param data_path_dict:
-    :param map_path:
     :param cache_root:
     :param read_from_cache:
     :return:
@@ -817,6 +824,7 @@ def get_cardiac_dysfunction_info(visit_dict, data_path_dict, cache_root, read_fr
         csv.writer(file).writerows(data_to_write)
     return diagnosis_dict
 
+
 def get_lab_test_info(visit_dict, data_path_dict, name_list_path, cache_root, read_from_cache=False):
     """
     返回所有目标Lab_test的入院值，-1代表相关数据缺失
@@ -854,7 +862,8 @@ def get_lab_test_info(visit_dict, data_path_dict, name_list_path, cache_root, re
         for visit_id in visit_dict[patient_id]:
             lab_test_dict[patient_id][visit_id] = dict()
             for item in name_dict:
-                lab_test_dict[patient_id][visit_id][name_dict[item]] = [-1, -1, -1, -1, datetime.datetime(2100, 1, 1, 0, 0, 0, 0)]
+                lab_test_dict[patient_id][visit_id][name_dict[item]] = [-1, -1, -1, -1,
+                                                                        datetime.datetime(2100, 1, 1, 0, 0, 0, 0)]
 
     # 整合数据，分别读取Master和Result中的数据，然后分别进行整合
     # 读取Master数据
@@ -952,6 +961,7 @@ def get_lab_test_info(visit_dict, data_path_dict, name_list_path, cache_root, re
         csv.writer(file).writerows(data_to_write)
     return lab_test_dict
 
+
 def get_egfr(visit_dict, sex_dict, age_dict, lab_test_dict):
     egfr_dict = dict()
     for patient_id in visit_dict:
@@ -971,6 +981,7 @@ def get_egfr(visit_dict, sex_dict, age_dict, lab_test_dict):
 
             egfr_dict[patient_id][visit_id] = egfr
     return egfr_dict
+
 
 def get_echocardiogram(visit_dict, data_path_dict, map_path, cache_root, read_from_cache=False):
     """
@@ -1104,9 +1115,10 @@ def get_echocardiogram(visit_dict, data_path_dict, map_path, cache_root, read_fr
         csv.writer(file).writerows(data_to_write)
     return exam_dict
 
+
 def reconstruct_data(visit_dict, visit_info_dict, procedure_dict, exam_dict, sex_dict, age_dict, medical_dict,
-                    diagnosis_dict, vital_sign_dict, lab_test_dict, egfr_dict, special_intervention_dict, cardiac_dysfunction_dict,
-                    diuretic_history_dict, labtest_binary=False):
+                     diagnosis_dict, vital_sign_dict, lab_test_dict, egfr_dict, special_intervention_dict,
+                     cardiac_dysfunction_dict, diuretic_history_dict, labtest_binary):
     # 获取手术，检查，用药，诊断，关键指标，实验室检查的有序序列
     general_list = list()
     visit_info_list = list()
@@ -1194,6 +1206,36 @@ def reconstruct_data(visit_dict, visit_info_dict, procedure_dict, exam_dict, sex
                 target_dict[item] = cardiac_dysfunction_dict[patient_id][visit_id][item]
             for item in diuretic_history_list:
                 target_dict[item] = diuretic_history_dict[patient_id][visit_id][item]
+    return data_dict, general_list
+
+
+def extra_data_filter(data_dict, general_list):
+    # eliminate the visit that is not caused by heart failure
+    for patient_id in data_dict:
+        for i in range(100):
+            if data_dict[patient_id].__contains__(i):
+                heart_failure_flag = data_dict[patient_id][i]['心力衰竭']
+                index = i
+            elif data_dict[patient_id].__contains__(str(i)):
+                heart_failure_flag = data_dict[patient_id][str(i)]['心力衰竭']
+                index = str(i)
+            else:
+                continue
+            if heart_failure_flag == 1 or heart_failure_flag == '1':
+                break
+            else:
+                data_dict[patient_id].pop(index)
+
+    eliminate_set = set()
+    for patient_id in data_dict:
+        if len(data_dict[patient_id]) < 3:
+            eliminate_set.add(patient_id)
+    for patient_id in eliminate_set:
+        data_dict.pop(patient_id)
+    return data_dict, general_list
+
+
+def write_data(data_dict, general_list, labtest_binary, extra_filter, truncate_year):
 
     # 写数据
     data_to_write = list()
@@ -1218,14 +1260,17 @@ def reconstruct_data(visit_dict, visit_info_dict, procedure_dict, exam_dict, sex
         for j in range(len(data_to_write[i])):
             if data_to_write[i][j] == -1 or data_to_write[i][j] == '-1':
                 data_to_write[i][j] = ''
-    save_path = os.path.abspath('resource/未预处理长期纵向数据_离散化_{}.csv'.format(labtest_binary))
+    save_path = os.path.abspath('../../resource/未预处理长期纵向数据_离散化_{}_特别筛选_{}_截断年份_{}.csv'.
+                                format(labtest_binary, extra_filter, truncate_year))
     with open(save_path, 'w', encoding='gbk', newline='') as file:
         csv.writer(file).writerows(data_to_write)
+
 
 def get_special_intervention_info(visit_dict, data_path_dict, map_path, cache_root, read_from_cache=False):
     """
     此处的特殊干预指两项，是否存在血滤事件或者注射利尿剂
     :param visit_dict:
+    :param map_path:
     :param data_path_dict:
     :param cache_root:
     :param read_from_cache:
@@ -1284,7 +1329,7 @@ def get_special_intervention_info(visit_dict, data_path_dict, map_path, cache_ro
                             if normalized_name == '利尿剂' and order_text.__contains__('注射'):
                                 drug_dict[patient_id][visit_id]['注射利尿剂'] = 1
             if order_text.__contains__('血液滤过') or order_text.__contains__('血滤') or \
-                order_text.__contains__('血液过滤') or order_text.__contains__('超滤'):
+                    order_text.__contains__('血液过滤') or order_text.__contains__('超滤'):
                 drug_dict[patient_id][visit_id]['超滤'] = 1
 
     cache_path = os.path.join(cache_root, 'special_intervention.csv')
@@ -1298,6 +1343,7 @@ def get_special_intervention_info(visit_dict, data_path_dict, map_path, cache_ro
         csv_writer.writerows(data_to_write)
 
     return drug_dict
+
 
 def diuretic_history(visit_dict, medical_dict):
     diuretic_history_dict = dict()
@@ -1317,38 +1363,56 @@ def diuretic_history(visit_dict, medical_dict):
                 if medical_dict[patient_id][nearest_visit]['利尿剂'] == '1':
                     diuretic_history_dict[patient_id][visit_id]['利尿剂史'] = '1'
     return diuretic_history_dict
-    
+
+
 def main():
+    truncate_year = 2008
+    labtest_binary = False
+
     data_root = os.path.abspath('H:/301HF/Update')
-    drug_map_path = os.path.abspath('resource/药品名称映射.csv')
-    diagnosis_map_path = os.path.abspath('resource/合并症不同名归一化.csv')
-    lab_test_list_path = os.path.abspath('resource/实验室检查名称清单.csv')
-    ehcocardiogram_map_path = os.path.abspath('resource/超声心动图名称映射.csv')
-    operation_map_path = os.path.abspath('resource/手术名称映射.csv')
-    file_name_list = ['diagnosis', 'diagnosis_category', 'exam_items', 'exam_master', 'exam_report', 'lab_result',
-                      'lab_test_items', 'lab_test_master', 'operation', 'operation_master', 'operation_name', 'orders',
-                      'pat_master_index', 'pat_visit', 'vital_signs_rec']
+    drug_map_path = os.path.abspath('../../resource/药品名称映射.csv')
+    diagnosis_map_path = os.path.abspath('../../resource/合并症不同名归一化.csv')
+    lab_test_list_path = os.path.abspath('../../resource/实验室检查名称清单.csv')
+    ehcocardiogram_map_path = os.path.abspath('../../resource/超声心动图名称映射.csv')
+    operation_map_path = os.path.abspath('../../resource/手术名称映射.csv')
+    file_name_list = ['diagnosis', 'diagnosis_category', 'exam_items', 'exam_master', 'exam_report',
+                      'lab_result', 'lab_test_items', 'lab_test_master', 'operation', 'operation_master',
+                      'operation_name', 'orders', 'pat_master_index', 'pat_visit', 'vital_signs_rec']
+    cache_root = os.path.abspath('../../resource/cache')
+
     data_path_dict = dict()
     for item in file_name_list:
         data_path_dict[item] = os.path.join(data_root, item+'.csv')
-    cache_root = os.path.abspath('resource/cache')
-    
-    visit_dict = get_valid_visit(data_path_dict, cache_root, read_from_cache=True)
-    echocardiogram_didct = get_echocardiogram(visit_dict, data_path_dict, ehcocardiogram_map_path, cache_root, read_from_cache=True)
-    lab_test_dict = get_lab_test_info(visit_dict, data_path_dict, lab_test_list_path, cache_root, read_from_cache=True)
-    diagnosis_dict = get_diagnosis_info(visit_dict, data_path_dict, diagnosis_map_path, cache_root, read_from_cache=True)
-    sex_dict, age_dict = get_demographic_info(visit_dict, data_path_dict, cache_root, read_from_cache=True)
-    visit_info_dict = get_visit_info(visit_dict, data_path_dict, cache_root, read_from_cache=True)
-    operation_dict = get_procedure(visit_dict, data_path_dict, operation_map_path, cache_root, read_from_cache=True)
-    vital_sign_dict = get_vital_sign(visit_dict, data_path_dict, cache_root, read_from_cache=True)
-    medical_dict = get_medical_info(visit_dict, data_path_dict, drug_map_path, cache_root, read_from_cache=True)
+
+    visit_dict = get_valid_visit(data_path_dict, cache_root, truncate_year=truncate_year, read_from_cache=False)
+    echocardiogram_dict = get_echocardiogram(visit_dict, data_path_dict, ehcocardiogram_map_path, cache_root,
+                                             read_from_cache=False)
+    lab_test_dict = get_lab_test_info(visit_dict, data_path_dict, lab_test_list_path, cache_root,
+                                      read_from_cache=False)
+    diagnosis_dict = get_diagnosis_info(visit_dict, data_path_dict, diagnosis_map_path, cache_root,
+                                        read_from_cache=False)
+    sex_dict, age_dict = get_demographic_info(visit_dict, data_path_dict, cache_root, read_from_cache=False)
+    visit_info_dict = get_visit_info(visit_dict, data_path_dict, cache_root, read_from_cache=False)
+    operation_dict = get_procedure(visit_dict, data_path_dict, operation_map_path, cache_root, read_from_cache=False)
+    vital_sign_dict = get_vital_sign(visit_dict, data_path_dict, cache_root, read_from_cache=False)
+    medical_dict = get_medical_info(visit_dict, data_path_dict, drug_map_path, cache_root, read_from_cache=False)
     egfr_dict = get_egfr(visit_dict, sex_dict, age_dict, lab_test_dict)
-    cardiac_dysfunction_dict = get_cardiac_dysfunction_info(visit_dict, data_path_dict, cache_root, read_from_cache=True)
-    special_intervention_dict = get_special_intervention_info(visit_dict, data_path_dict, drug_map_path, cache_root, read_from_cache=True)
+    cardiac_dysfunction_dict = get_cardiac_dysfunction_info(visit_dict, data_path_dict, cache_root,
+                                                            read_from_cache=False)
+    special_intervention_dict = get_special_intervention_info(visit_dict, data_path_dict, drug_map_path, cache_root,
+                                                              read_from_cache=False)
     diuretic_history_dict = diuretic_history(visit_dict, medical_dict)
-    reconstruct_data(visit_dict, visit_info_dict, operation_dict, echocardiogram_didct, sex_dict, age_dict, medical_dict,
-                    diagnosis_dict, vital_sign_dict, lab_test_dict, egfr_dict, special_intervention_dict, cardiac_dysfunction_dict,
-                    diuretic_history_dict, labtest_binary=True)
+    data_dict, general_list = reconstruct_data(visit_dict, visit_info_dict, operation_dict, echocardiogram_dict,
+                                               sex_dict, age_dict, medical_dict, diagnosis_dict, vital_sign_dict,
+                                               lab_test_dict, egfr_dict, special_intervention_dict,
+                                               cardiac_dysfunction_dict, diuretic_history_dict,
+                                               labtest_binary=labtest_binary)
+
+    extra_filter = True
+    if extra_filter:
+        data_dict, general_list = extra_data_filter(data_dict, general_list)
+    write_data(data_dict, general_list, labtest_binary=labtest_binary, extra_filter=extra_filter,
+               truncate_year=truncate_year)
     print('accomplished')
 
 

@@ -3,9 +3,9 @@ import os
 
 
 def main():
-    data_path = os.path.abspath('resource/未预处理长期纵向数据_离散化_True.csv')
-    binary_path = os.path.abspath('resource/二值化策略.csv')
-    save_data_path = os.path.abspath('resource/二值化后的长期纵向数据.csv')
+    data_path = os.path.abspath('../../resource/未预处理长期纵向数据_离散化_True.csv')
+    binary_path = os.path.abspath('../../resource/二值化策略.csv')
+    save_data_path = os.path.abspath('../../resource/二值化后的长期纵向数据.csv')
     data_dict, contextual_list = read_data(data_path)
     binary_process_dict = read_binary_process_feature(binary_path)
     binary_data_dict, revised_content_list = binary(data_dict, binary_process_dict, contextual_list)

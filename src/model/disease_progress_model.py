@@ -2,6 +2,7 @@
 import numpy as np
 import random
 import os
+import scipy as sp
 import datetime
 import csv
 from math import log, exp
@@ -9,7 +10,8 @@ import data_reader
 
 
 class DiseaseProgressionModel(object):
-    def __init__(self, data, num_risk_tier, num_subtype, alpha, beta, gamma, dependence_constraint=2):
+    def __init__(self, data, num_risk_tier, num_subtype, alpha, beta, gamma, dependence_constraint=2,
+                 init_state_candidate=2, parameter_init_folder=None):
         """
         :param data: data structure
             level 1: sequence of patient trajectories [trajectory_1, trajectory_2, ..., trajectory_M]
@@ -45,7 +47,12 @@ class DiseaseProgressionModel(object):
         self.__Phi = None
         self.__iteration = None
         self.__hidden_state_assignment = None
+        self.__loss_list = [['iteration count', 'log likelihood']]
         self.__dependence_constraint = dependence_constraint
+        self.__init_state_candidate = init_state_candidate
+        self.__parameter_init_folder = parameter_init_folder
+        if init_state_candidate > num_subtype:
+            raise ValueError('')
 
         # initialize all variables
         self.__initialization()
@@ -65,42 +72,75 @@ class DiseaseProgressionModel(object):
                         self.__O = item
         self.__O += 1
 
-        # initialize parameter
-        # note all parameters follows categorical distribution, i.e., the sum of each row (2D case) should be 1
-        # note the markov chain needs a initial state, so the size of state space is K+1, we use the state
-        # whose idx is K to denote the initial state
-        # we define the initial state is K
+        self.__Theta = np.zeros([self.__K + 1, self.__K])
         self.__Pi = np.zeros([self.__K, self.__R])
         self.__Phi = np.zeros([self.__K, self.__R, self.__O])
-        # normalization
-        for i in range(len(self.__Pi)):
-            sample = np.random.dirichlet(np.full(self.__R, self.__gamma))
-            for j in range(len(self.__Pi[i])):
-                self.__Pi[i, j] = sample[j]
-        for i in range(len(self.__Phi)):
-            for j in range(len(self.__Phi[i])):
-                sample = np.random.dirichlet(np.full(self.__O, self.__beta))
-                for k in range(len(self.__Phi[i, j])):
-                    self.__Phi[i, j, k] = sample[k]
+        if self.__parameter_init_folder is not None:
+            phi_path = os.path.join(self.__parameter_init_folder, 'phi.csv')
+            theta_path = os.path.join(self.__parameter_init_folder, 'theta.csv')
+            pi_path = os.path.join(self.__parameter_init_folder, 'pi.csv')
+            with open(phi_path, 'r', encoding='utf-8-sig', newline='') as f:
+                csv_reader = csv.reader(f)
+                for i, line in enumerate(csv_reader):
+                    if i == 0 or i % 6 == 0 or i % 6 == 1 or i % 6 == 4 or i % 6 == 5:
+                        continue
+                    for j, item in enumerate(line):
+                        if j == 0:
+                            continue
+                        self.__Phi[i//6, i % 6-2, j-1] = float(item)
+            with open(theta_path, 'r', encoding='utf-8-sig', newline='') as f:
+                csv_reader = csv.reader(f)
+                for i, line in enumerate(csv_reader):
+                    if i == 0:
+                        continue
+                    for j, item in enumerate(line):
+                        if j == 0:
+                            continue
+                        self.__Theta[i-1, j-1] = float(item)
+            with open(pi_path, 'r', encoding='utf-8-sig', newline='') as f:
+                csv_reader = csv.reader(f)
+                for i, line in enumerate(csv_reader):
+                    if i == 0:
+                        continue
+                    for j, item in enumerate(line):
+                        if j == 0:
+                            continue
+                        self.__Pi[i-1, j-1] = float(item)
+        else:
+            # initialize parameter
+            # note all parameters follows categorical distribution, i.e., the sum of each row (2D case) should be 1
+            # note the markov chain needs a initial state, so the size of state space is K+1, we use the state
+            # whose idx is K to denote the initial state
+            # we define the initial state is K
 
-        # initialize Theta with constraint
-        # Theta is a upper triangular matrix
-        self.__Theta = np.zeros([self.__K + 1, self.__K])
-        constraint = self.__dependence_constraint
-        # init state
-        init_trans_distribution = np.random.dirichlet(np.full(self.__K, self.__alpha))
-        for i in range(self.__K):
-            self.__Theta[self.__K, i] = init_trans_distribution[i]
-        # transition state
-        for i in range(self.__K):
-            if i+constraint < self.__K:
-                init_trans_distribution = np.random.dirichlet(np.full(constraint+1, self.__alpha))
-                for j in range(i, i+constraint+1):
-                    self.__Theta[i, j] = init_trans_distribution[j-i]
-            else:
-                init_trans_distribution = np.random.dirichlet(np.full(self.__K-i, self.__alpha))
-                for j in range(i, i+self.__K-i):
-                    self.__Theta[i, j] = init_trans_distribution[j-i]
+            # normalization
+            for i in range(len(self.__Pi)):
+                sample = np.random.dirichlet(np.full(self.__R, self.__gamma))
+                for j in range(len(self.__Pi[i])):
+                    self.__Pi[i, j] = sample[j]
+            for i in range(len(self.__Phi)):
+                for j in range(len(self.__Phi[i])):
+                    sample = np.random.dirichlet(self.__beta)
+                    for k in range(len(self.__Phi[i, j])):
+                        self.__Phi[i, j, k] = sample[k]
+
+            # initialize Theta with constraint
+            # Theta is a upper triangular matrix
+            constraint = self.__dependence_constraint
+            # init state
+            init_trans_distribution = np.random.dirichlet(np.full(self.__init_state_candidate, self.__alpha))
+            for i in range(self.__init_state_candidate):
+                self.__Theta[self.__K, i] = init_trans_distribution[i]
+            # transition state
+            for i in range(self.__K):
+                if i+constraint < self.__K:
+                    init_trans_distribution = np.random.dirichlet(np.full(constraint+1, self.__alpha))
+                    for j in range(i, i+constraint+1):
+                        self.__Theta[i, j] = init_trans_distribution[j-i]
+                else:
+                    init_trans_distribution = np.random.dirichlet(np.full(self.__K-i, self.__alpha))
+                    for j in range(i, i+self.__K-i):
+                        self.__Theta[i, j] = init_trans_distribution[j-i]
 
         # initialize topic assignment with constraint
         self.__hidden_state_assignment = list()
@@ -110,12 +150,16 @@ class DiseaseProgressionModel(object):
             self.__hidden_state_assignment.append(list())
             for j in range(len(trajectory)):
                 if j == 0:
-                    current_subtype = random.randint(0, self.__K-1)
+                    current_state = random.randint(0, self.__init_state_candidate-1)
                 else:
                     # the latter state can't be bigger than the previous one
-                    current_subtype = random.randint(self.__hidden_state_assignment[-1][-1][0], self.__K-1)
+                    latter_state_candidate = self.__hidden_state_assignment[-1][-1][0] + self.__dependence_constraint
+                    current_state = self.__hidden_state_assignment[-1][-1][0]
+                    if latter_state_candidate >= self.__K:
+                        latter_state_candidate = self.__K - 1
+                    current_state = random.randint(current_state, latter_state_candidate)
                 risk_tier = random.randint(0, self.__R-1)
-                self.__hidden_state_assignment[-1].append([current_subtype, risk_tier])
+                self.__hidden_state_assignment[-1].append([current_state, risk_tier])
 
         # the index of initial state is K
         self.__n_z = np.zeros([self.__K+1, self.__K])
@@ -126,34 +170,42 @@ class DiseaseProgressionModel(object):
             trajectory = self.__hidden_state_assignment[i]
             for j in range(len(trajectory)):
                 # updating n_z
-                current_subtype = self.__hidden_state_assignment[i][j][0]
+                current_state = self.__hidden_state_assignment[i][j][0]
                 if j == 0:
-                    previous_subtype = self.__K
+                    previous_state = self.__K
                 else:
-                    previous_subtype = self.__hidden_state_assignment[i][j-1][0]
-                self.__n_z[previous_subtype, current_subtype] += 1
+                    previous_state = self.__hidden_state_assignment[i][j-1][0]
+                self.__n_z[previous_state, current_state] += 1
 
                 # updating n_r
                 risk_tier = self.__hidden_state_assignment[i][j][1]
-                self.__n_r[current_subtype, risk_tier] += 1
+                self.__n_r[current_state, risk_tier] += 1
 
                 # updating n_o
                 obs_sequence = self.__data[i][j]
                 for k in range(len(obs_sequence)):
                     observation = obs_sequence[k]
-                    self.__n_o[current_subtype, risk_tier, observation] += 1
+                    self.__n_o[current_state, risk_tier, observation] += 1
         print('initialize procedure accomplished')
 
-    def optimization(self, iteration_num):
-        for i in range(iteration_num):
+    def optimization(self, iteration_num, update_interval=10):
+        start_time = datetime.datetime.now()
+
+        likelihood = self.log_likelihood()
+        print('initial log likelihood {}'. format(likelihood))
+        self.__loss_list.append([0, likelihood])
+
+        for i in range(1, iteration_num+1):
             self.__iteration = iteration_num
-            start_time = datetime.datetime.now()
             self.__inference()
-            self.__parameter_updating()
-            likelihood = self.log_likelihood()
-            end_time = datetime.datetime.now()
-            print('iteration {} accomplished, current log-likelihood {}, time cost {} s'.
-                  format(i+1, likelihood, (end_time-start_time).seconds))
+            if i % update_interval == 0 or i == iteration_num:
+                self.__parameter_updating()
+                likelihood = self.log_likelihood()
+                end_time = datetime.datetime.now()
+                print('iteration {} accomplished, current log-likelihood {}, time cost {} s'.
+                      format(i, likelihood, (end_time-start_time).seconds))
+                start_time = datetime.datetime.now()
+                self.__loss_list.append([i, likelihood])
 
     def __inference(self):
         # updating z
@@ -190,7 +242,7 @@ class DiseaseProgressionModel(object):
         # Step 2: calculate probability with constraint, follow Eq. 21
         # first visit check
         if previous_state == self.__K:
-            candidate_state_count = self.__K
+            candidate_state_count = self.__init_state_candidate
         else:
             candidate_state_count = self.__K - previous_state
             if candidate_state_count > self.__dependence_constraint + 1:
@@ -237,9 +289,9 @@ class DiseaseProgressionModel(object):
         part_3 = np.zeros([candidate_state_count])
         for k in range(start_state, end_state):
             part_3_obs = 1
-            denominator = self.__O * self.__beta + np.sum(self.__n_o[k, risk_tier])
+            denominator = np.sum(self.__beta) + np.sum(self.__n_o[k, risk_tier])
             for obs in self.__data[i][j]:
-                numerator = self.__beta + self.__n_o[k, risk_tier, obs]
+                numerator = self.__beta[obs] + self.__n_o[k, risk_tier, obs]
                 part_3_obs = part_3_obs * numerator / denominator
             part_3[k-start_state] = part_3_obs
 
@@ -288,9 +340,9 @@ class DiseaseProgressionModel(object):
         part_1 = part_1_numerator / part_1_denominator
         # For Part 2
         part_2 = 1
-        part_2_denominator = self.__O * self.__beta + np.sum(self.__n_o[current_state, :, :], axis=1)
+        part_2_denominator = np.sum(self.__beta) + np.sum(self.__n_o[current_state, :, :], axis=1)
         for observation in self.__data[i][j]:
-            part_2_numerator = self.__beta + self.__n_o[current_state, :, observation]
+            part_2_numerator = self.__beta[observation] + self.__n_o[current_state, :, observation]
             part_2 = part_2 * part_2_numerator / part_2_denominator
 
         unnormalized_probability = part_1 * part_2
@@ -340,7 +392,7 @@ class DiseaseProgressionModel(object):
             for j in range(self.__R):
                 for k in range(self.__O):
                     self.__Phi[i][j][k] = \
-                        (self.__n_o[i][j][k] + self.__beta) / np.sum(self.__n_o[i][j] + self.__beta)
+                        (self.__n_o[i][j][k] + self.__beta[k]) / np.sum(self.__n_o[i][j] + self.__beta)
                     if self.__Phi[i][j][k] < 0:
                         print('ERROR')
 
@@ -385,9 +437,9 @@ class DiseaseProgressionModel(object):
         return likelihood
 
     # calculate log p given j, k
-    def __calculate_part_3(self, trajectory, visit_id, subtype):
+    def __calculate_part_3(self, trajectory, visit_id, state):
         # Follow Algorithm 3
-        j, k = visit_id, subtype
+        j, k = visit_id, state
         log_p = 0
         for m in range(self.__R):
             current_sum = log(self.__Pi[k, m])
@@ -404,9 +456,9 @@ class DiseaseProgressionModel(object):
         return log_p
 
     # calculate log q with constraint
-    def __forward_calculate_part_2(self, trajectory, cache, visit_id, subtype):
+    def __forward_calculate_part_2(self, trajectory, cache, visit_id, state):
         # Follow Eq. 26, 27, Algorithm 2
-        j, k = visit_id, subtype
+        j, k = visit_id, state
         log_q = 0
 
         # note in this case, we don't need do care about the initial state, i.e., l = self.__K
@@ -419,7 +471,12 @@ class DiseaseProgressionModel(object):
 
             log_p = self.__calculate_part_3(trajectory, j, k)
             if j == 0:
-                current_sum = log(self.__Theta[self.__K, k]) + log_p
+                # It is impossible for some cases to accomplish transition like init state (e.g. state 5) -> state 3
+                # to ensure numerical stability, we will assign a very small value for those impossible transition
+                if self.__Theta[self.__K, k] == 0:
+                    current_sum = -10000 + log_p
+                else:
+                    current_sum = log(self.__Theta[self.__K, k]) + log_p
             else:
                 current_sum = cache[-1][l_] + log(self.__Theta[l_, k]) + log_p
 
@@ -431,12 +488,12 @@ class DiseaseProgressionModel(object):
                 else:
                     log_q = current_sum + log(1 + exp(log_q - current_sum))
 
-            if log_q >= 0:
-                raise ValueError('')
+        if log_q >= -0.1:
+            raise ValueError('')
         return log_q
 
-    def __backward_calculate_part_2(self, trajectory, cache, visit_id, subtype):
-        j, k = visit_id, subtype
+    def __backward_calculate_part_2(self, trajectory, cache, visit_id, state):
+        j, k = visit_id, state
         log_q = 0
 
         if j == len(trajectory)-1:
@@ -469,8 +526,8 @@ class DiseaseProgressionModel(object):
         forward_cache = list()
         for visit_index in range(terminate_idx):
             a_ij = list()
-            for patient_subtype in range(self.__K):
-                a_ijk = self.__forward_calculate_part_2(trajectory, forward_cache, visit_index, patient_subtype)
+            for patient_state in range(self.__K):
+                a_ijk = self.__forward_calculate_part_2(trajectory, forward_cache, visit_index, patient_state)
                 a_ij.append(a_ijk)
             forward_cache.append(a_ij)
         return forward_cache[-1]
@@ -479,8 +536,8 @@ class DiseaseProgressionModel(object):
         backward_cache = list()
         for visit_index in range(start_idx, len(trajectory)).__reversed__():
             a_ij = list()
-            for patient_subtype in range(self.__K):
-                a_ijk = self.__backward_calculate_part_2(trajectory, backward_cache, visit_index, patient_subtype)
+            for patient_state in range(self.__K):
+                a_ijk = self.__backward_calculate_part_2(trajectory, backward_cache, visit_index, patient_state)
                 a_ij.append(a_ijk)
             backward_cache.append(a_ij)
         return backward_cache[-1]
@@ -529,7 +586,11 @@ class DiseaseProgressionModel(object):
                                     log_prob = log_prob + log(1 + exp(temp - log_prob))
                                 else:
                                     log_prob = temp + log(1 + exp(log_prob - temp))
-                        log_prob += log(theta[prev_state, k])
+
+                        if theta[prev_state, k] == 0:
+                            log_prob += -300
+                        else:
+                            log_prob += log(theta[prev_state, k])
                         delta[j, k] = log_prob
                         psi[j, k] = -10000
                     continue
@@ -595,10 +656,8 @@ class DiseaseProgressionModel(object):
         risk_tier_list = list()
         for trajectory in document:
             # hidden state inference procedure, Follow Eq.34
-            if visit_idx == -1:
-                idx = len(trajectory)-1
-            else:
-                idx = visit_idx
+            idx = len(trajectory)+visit_idx
+
             log_forward_prob = np.array(self.__forward_procedure(trajectory, idx))
             log_backward_prob = np.array(self.__backward_procedure(trajectory, idx))
             numerator = log_forward_prob + log_backward_prob
@@ -648,6 +707,7 @@ class DiseaseProgressionModel(object):
         result_dict['beta'] = self.__beta
         result_dict['gamma'] = self.__gamma
         result_dict['iteration'] = self.__iteration
+        result_dict['dependence_constraint'] = self.__dependence_constraint
 
         with open(os.path.join(folder_path, 'result_parameter.csv'), "w",
                   encoding='utf-8-sig', newline='') as f:
@@ -783,12 +843,16 @@ class DiseaseProgressionModel(object):
                   "w", encoding='utf-8-sig', newline='') as f:
             hidden = self.__hidden_state_assignment
             hidden_matrix = list()
-            hidden_matrix.append(['patient_id', 'visit_index', 'subtype', 'risk_tier'])
+            hidden_matrix.append(['patient_id', 'visit_index', 'state', 'risk_tier'])
             for i in range(len(hidden)):
                 patient_id = index_patient_dict[i]
                 for j in range(len(hidden[i])):
                     hidden_matrix.append([patient_id, j, hidden[i][j][0], hidden[i][j][1]])
             csv.writer(f).writerows(hidden_matrix)
+
+        with open(os.path.join(folder_path, 'likelihood_change.csv'),
+                  "w", encoding='utf-8-sig', newline='') as f:
+            csv.writer(f).writerows(self.__loss_list)
 
 
 def synthetic_data_generator(num_trajectory, max_visit, min_visit, max_observation_length, min_observation_length,
@@ -849,15 +913,16 @@ def unit_test():
     file_path = os.path.abspath('../../resource/二值化后的长期纵向数据.csv')
     document, index_name_dict, index_patient_dict = data_reader.data_reader(file_path)
 
-    risk_tier = 3
+    obs_num = 107
+    risk_tier = 2
     patient_subtype = 4
     alpha = 1
-    beta = 1
-    gamma = 1
+    beta = np.full(obs_num, 0.1)
+    gamma = 0.1
     disease_progression_model = DiseaseProgressionModel(document, alpha=alpha, beta=beta, gamma=gamma,
                                                         num_risk_tier=risk_tier, num_subtype=patient_subtype)
 
-    disease_progression_model.optimization(50)
+    disease_progression_model.optimization(1, update_interval=1)
     estimated_risk_list = disease_progression_model.risk_tier_inference(document)
     estimated_state_list = disease_progression_model.disease_state_assignment(document)
 
