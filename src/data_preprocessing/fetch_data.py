@@ -1212,18 +1212,16 @@ def reconstruct_data(visit_dict, visit_info_dict, procedure_dict, exam_dict, sex
 def extra_data_filter(data_dict, general_list):
     # eliminate the visit that is not caused by heart failure
     for patient_id in data_dict:
-        for i in range(100):
-            if data_dict[patient_id].__contains__(i):
-                heart_failure_flag = data_dict[patient_id][i]['心力衰竭']
-                index = i
-            elif data_dict[patient_id].__contains__(str(i)):
-                heart_failure_flag = data_dict[patient_id][str(i)]['心力衰竭']
-                index = str(i)
+        for visit_index in range(100):
+            if data_dict[patient_id].__contains__(visit_index):
+                heart_failure_flag = data_dict[patient_id][visit_index]['心力衰竭']
+                index = visit_index
+            elif data_dict[patient_id].__contains__(str(visit_index)):
+                heart_failure_flag = data_dict[patient_id][str(visit_index)]['心力衰竭']
+                index = str(visit_index)
             else:
                 continue
-            if heart_failure_flag == 1 or heart_failure_flag == '1':
-                break
-            else:
+            if not (heart_failure_flag == 1 or heart_failure_flag == '1'):
                 data_dict[patient_id].pop(index)
 
     eliminate_set = set()
@@ -1365,8 +1363,50 @@ def diuretic_history(visit_dict, medical_dict):
     return diuretic_history_dict
 
 
+def time_offset(data_dict, general_list):
+    # set the time of first visit as 0
+    # delete all variable whose time interval is illegal
+
+    # find first visit
+    offset_dict = dict()
+    for patient_id in data_dict:
+        first_visit = 1000
+        day_offset = 0
+        for visit_id in data_dict[patient_id]:
+            visit_int = int(visit_id)
+            if first_visit > visit_int:
+                first_visit = visit_int
+                day_offset = int(data_dict[patient_id][visit_id]['时间差'])
+        offset_dict[patient_id] = [first_visit, day_offset]
+    for patient_id in data_dict:
+        for visit_id in data_dict[patient_id]:
+            first_visit, day_offset = offset_dict[patient_id]
+            current_visit_time = int(data_dict[patient_id][visit_id]['时间差'])
+            data_dict[patient_id][visit_id]['时间差'] = str(current_visit_time-day_offset)
+
+    # if the time point of later visit is less or equal than the previous one plus one week, it's illegal
+    invalid_patient_set = set()
+    patient_visit_time_dict = dict()
+    for patient_id in data_dict:
+        patient_visit_time_dict[patient_id] = list()
+        for visit_id in data_dict[patient_id]:
+            time_point = data_dict[patient_id][visit_id]['时间差']
+            patient_visit_time_dict[patient_id].append([int(visit_id), int(time_point)])
+        patient_visit_time_dict[patient_id].sort(key= lambda x:x[0])
+    for patient_id in patient_visit_time_dict:
+        for i in range(1, len(patient_visit_time_dict[patient_id])):
+            current_time = patient_visit_time_dict[patient_id][i][1]
+            previous_time = patient_visit_time_dict[patient_id][i-1][1]
+            if previous_time + 7 >= current_time:
+                invalid_patient_set.add(patient_id)
+    for patient_id in invalid_patient_set:
+        data_dict.pop(patient_id)
+
+    return data_dict, general_list
+
+
 def main():
-    truncate_year = 2008
+    truncate_year = 2009
     labtest_binary = False
 
     data_root = os.path.abspath('H:/301HF/Update')
@@ -1384,23 +1424,23 @@ def main():
     for item in file_name_list:
         data_path_dict[item] = os.path.join(data_root, item+'.csv')
 
-    visit_dict = get_valid_visit(data_path_dict, cache_root, truncate_year=truncate_year, read_from_cache=False)
+    visit_dict = get_valid_visit(data_path_dict, cache_root, truncate_year=truncate_year, read_from_cache=True)
     echocardiogram_dict = get_echocardiogram(visit_dict, data_path_dict, ehcocardiogram_map_path, cache_root,
-                                             read_from_cache=False)
+                                             read_from_cache=True)
     lab_test_dict = get_lab_test_info(visit_dict, data_path_dict, lab_test_list_path, cache_root,
                                       read_from_cache=False)
     diagnosis_dict = get_diagnosis_info(visit_dict, data_path_dict, diagnosis_map_path, cache_root,
-                                        read_from_cache=False)
-    sex_dict, age_dict = get_demographic_info(visit_dict, data_path_dict, cache_root, read_from_cache=False)
-    visit_info_dict = get_visit_info(visit_dict, data_path_dict, cache_root, read_from_cache=False)
-    operation_dict = get_procedure(visit_dict, data_path_dict, operation_map_path, cache_root, read_from_cache=False)
-    vital_sign_dict = get_vital_sign(visit_dict, data_path_dict, cache_root, read_from_cache=False)
-    medical_dict = get_medical_info(visit_dict, data_path_dict, drug_map_path, cache_root, read_from_cache=False)
+                                        read_from_cache=True)
+    sex_dict, age_dict = get_demographic_info(visit_dict, data_path_dict, cache_root, read_from_cache=True)
+    visit_info_dict = get_visit_info(visit_dict, data_path_dict, cache_root, read_from_cache=True)
+    operation_dict = get_procedure(visit_dict, data_path_dict, operation_map_path, cache_root, read_from_cache=True)
+    vital_sign_dict = get_vital_sign(visit_dict, data_path_dict, cache_root, read_from_cache=True)
+    medical_dict = get_medical_info(visit_dict, data_path_dict, drug_map_path, cache_root, read_from_cache=True)
     egfr_dict = get_egfr(visit_dict, sex_dict, age_dict, lab_test_dict)
     cardiac_dysfunction_dict = get_cardiac_dysfunction_info(visit_dict, data_path_dict, cache_root,
-                                                            read_from_cache=False)
+                                                            read_from_cache=True)
     special_intervention_dict = get_special_intervention_info(visit_dict, data_path_dict, drug_map_path, cache_root,
-                                                              read_from_cache=False)
+                                                              read_from_cache=True)
     diuretic_history_dict = diuretic_history(visit_dict, medical_dict)
     data_dict, general_list = reconstruct_data(visit_dict, visit_info_dict, operation_dict, echocardiogram_dict,
                                                sex_dict, age_dict, medical_dict, diagnosis_dict, vital_sign_dict,
@@ -1411,6 +1451,7 @@ def main():
     extra_filter = True
     if extra_filter:
         data_dict, general_list = extra_data_filter(data_dict, general_list)
+    data_dict, general_list = time_offset(data_dict, general_list)
     write_data(data_dict, general_list, labtest_binary=labtest_binary, extra_filter=extra_filter,
                truncate_year=truncate_year)
     print('accomplished')

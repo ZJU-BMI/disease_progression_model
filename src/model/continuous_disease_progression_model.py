@@ -132,15 +132,14 @@ class ContinuousDiseaseProgressModel(object):
 
         self.__hidden_state = hidden_state_dict
 
-    def optimization(self, iteration, likelihood_calculate_interval=10, output_i_0=True):
+    def optimization(self, iteration, likelihood_calculate_interval=10):
         self.__iteration = iteration
         general_start_time = start_time = datetime.datetime.now()
 
         # The Convergence of this optimization is proofed in
         # The Calculation of Posterior Distributions by Data Augmentation, Tanner, 1987
-        for i in range(iteration):
-            if i == iteration - 1 or i % likelihood_calculate_interval == likelihood_calculate_interval - 1 or \
-                    output_i_0:
+        for i in range(0, iteration):
+            if i == iteration or i % likelihood_calculate_interval == 0:
                 visit_time_dict = self.__visit_time_dict
                 log_likelihood = self.log_likelihood(visit_time_dict)
                 end_time = datetime.datetime.now()
@@ -270,6 +269,11 @@ class ContinuousDiseaseProgressModel(object):
         new_hidden_state_dict = \
             self.__forward_filtering_backward_sampling(previous_hidden_state, poisson_events_dict, generator_mat,
                                                        init_state_prob, obs_hyperparameters, omega)
+        # for test usage
+        # hidden_state_count = 0
+        # for patient_id in new_hidden_state_dict:
+        #     hidden_state_count += len(new_hidden_state_dict[patient_id])
+        # print('average hidden states in a trajectory: {}'.format(hidden_state_count/len(new_hidden_state_dict)))
         return new_hidden_state_dict
 
     def __generating_poisson_event(self, previous_hidden_state, generator_mat, omega):
@@ -284,10 +288,14 @@ class ContinuousDiseaseProgressModel(object):
         for patient_id in visit_time:
             poisson_event_list = []
             
-            for i in range(len(previous_hidden_state[patient_id])-1):
+            for i in range(len(previous_hidden_state[patient_id])):
                 markov_state_list = previous_hidden_state[patient_id]
                 start_time = markov_state_list[i][1]
-                end_time = markov_state_list[i+1][1]
+                if i == len(previous_hidden_state[patient_id]) - 1:
+                    last_visit = self.__find_last_visit_id(patient_id)
+                    end_time = visit_time[patient_id][last_visit]
+                else:
+                    end_time = markov_state_list[i+1][1]
                 hidden_state = markov_state_list[i][0]
                 r_t = omega + generator_mat[hidden_state, hidden_state]
                 
@@ -357,6 +365,7 @@ class ContinuousDiseaseProgressModel(object):
         return combined_sequence_dict
 
     @staticmethod
+    # checked
     def __log_observation_prob(obs_list=None, hidden_state=None, obs_hyperparameters=None):
         """
         calculate the observation of given condition.
@@ -391,13 +400,13 @@ class ContinuousDiseaseProgressModel(object):
 
         return log_observation_prob
 
-    def __find_visit_between_two_event(self, event_sequence_dict, patient_id, start_event, end_event):
+    def __find_visit_between_two_event(self, patient_id, current_time, last_time):
         # find candidate visit between two visit
         # if happen time of a visit equals to the happen time of end event, we think the event is not valid
         visit_time_dict = self.__visit_time_dict
-        current_time = event_sequence_dict[patient_id][end_event]
-        last_time = event_sequence_dict[patient_id][start_event]
         candidate_visit = []
+        if current_time is None:
+            current_time = 10000000
         for visit_id in visit_time_dict[patient_id]:
             visit_time = visit_time_dict[patient_id][visit_id]
             if current_time > visit_time >= last_time:
@@ -422,14 +431,16 @@ class ContinuousDiseaseProgressModel(object):
                     for j in range(self.__num_state):
                         if init_state_prob[j] == 0:
                             # for the case which is impossible, assign a very small value
-                            single_visit_procedure.append(-10000)
+                            single_visit_procedure.append(-10000000)
                         else:
                             single_visit_procedure.append(log(init_state_prob[j]))
                     forward_procedure_mat.append(single_visit_procedure)
                     continue
 
                 # find corresponding visit
-                candidate_visit = self.__find_visit_between_two_event(event_sequence_dict, patient_id, i-1, i)
+                current_time = event_sequence_dict[patient_id][i]
+                previous_time = event_sequence_dict[patient_id][i-1]
+                candidate_visit = self.__find_visit_between_two_event(patient_id, current_time, previous_time)
                 log_observation_prob_list = list()
                 for j in range(self.__num_state):
                     # calculate log prob of observations
@@ -451,7 +462,7 @@ class ContinuousDiseaseProgressModel(object):
                         # calculate the log transition prob
                         transition_prob = transition_mat[k, j]
                         if transition_prob == 0 or transition_prob == 0.0:
-                            log_transition_prob = -1000
+                            log_transition_prob = -10000000
                         else:
                             log_transition_prob = log(transition_prob)
 
@@ -477,7 +488,7 @@ class ContinuousDiseaseProgressModel(object):
                                 event_sequence_dict):
         """
         Note, according to our settings. The forward procedure doesn't contain the current observation
-        and the last observation is at the same time as the last event
+        and the last observation (may be more event) is at the same time as the last event
         :param forward_procedure_dict:
         :param obs_hyperparameters:
         :param transition_mat:
@@ -490,13 +501,18 @@ class ContinuousDiseaseProgressModel(object):
             forward_list = forward_procedure_dict[patient_id]
 
             # get the last state
-            last_visit = self.__find_last_visit_id(patient_id)
+            previous_time = event_sequence_dict[patient_id][-1]
+            visit_list = self.__find_visit_between_two_event(patient_id, None, previous_time)
             log_last_prob = []
+            if len(visit_list) == 0:
+                raise ValueError('')
             for i in range(self.__num_state):
-                obs_list = self.__obs_dict[patient_id][last_visit]
+                log_obs_prob = 0
+                for visit_id in visit_list:
+                    obs_list = self.__obs_dict[patient_id][visit_id]
 
-                log_obs_prob = self.__log_observation_prob(obs_list=obs_list, hidden_state=i,
-                                                           obs_hyperparameters=obs_hyperparameters)
+                    log_obs_prob += self.__log_observation_prob(obs_list=obs_list, hidden_state=i,
+                                                                obs_hyperparameters=obs_hyperparameters)
                 log_last_prob.append(log_obs_prob+forward_list[-1][i])
             state = self.__sample_from_log_prob(log_last_prob)
             hidden_state_dict[patient_id].insert(0, state)
@@ -505,14 +521,16 @@ class ContinuousDiseaseProgressModel(object):
             i_list = [i for i in range(len(forward_list)-1)].__reversed__()
             for i in i_list:
                 candidate_log_prob_list = list()
-                candidate_visit = self.__find_visit_between_two_event(event_sequence_dict, patient_id, i, i+1)
+                current_time = event_sequence_dict[patient_id][i]
+                previous_time = event_sequence_dict[patient_id][i-1]
+                candidate_visit = self.__find_visit_between_two_event(patient_id, current_time, previous_time)
                 for hidden_state in range(self.__num_state):
                     next_state = hidden_state_dict[patient_id][0]
                     alpha = forward_list[i][hidden_state]
                     # calculate the log transition prob
                     transition_prob = transition_mat[hidden_state, next_state]
                     if transition_prob == 0 or transition_prob == 0.0:
-                        log_transition_prob = -1000
+                        log_transition_prob = -10000000
                     else:
                         log_transition_prob = log(transition_prob)
                     log_prob_ = log_transition_prob+alpha
@@ -697,9 +715,9 @@ class ContinuousDiseaseProgressModel(object):
                             obs_sum = np.sum(data_list_one_state)
                             obs_len = len(data_list_one_state)
                             prior_mean, prior_variance, preset_variance = self.__prior_set[2][index][hidden_state][2:]
-                            posterior_variance = \
-                                (prior_variance*preset_variance)/(preset_variance+obs_len*prior_variance)
-                            posterior_mean = posterior_variance * (prior_mean/prior_variance + obs_sum/preset_variance)
+                            posterior_variance = preset_variance
+                            variance_ = (prior_variance*preset_variance)/(preset_variance+obs_len*prior_variance)
+                            posterior_mean = variance_*(prior_mean/prior_variance + obs_sum/preset_variance)
                             self.__mixture_posterior_set[parallel_index][2][index][hidden_state][2] = posterior_mean
                             self.__mixture_posterior_set[parallel_index][2][index][hidden_state][3] = posterior_variance
                 elif data_type == 'binomial':
@@ -745,6 +763,7 @@ class ContinuousDiseaseProgressModel(object):
             raise ValueError('')
         return hidden_state
 
+    # checked
     def log_likelihood(self, visit_time_dict):
         # Estimate the parameter. We use the mean of mixture distribution as the parameter
         generate_mat, init_vec, obs_para_dict = self.__estimate_parameter()
@@ -766,6 +785,7 @@ class ContinuousDiseaseProgressModel(object):
             general_log_likelihood += log_prob
         return general_log_likelihood
 
+    # checked
     def __inhomogeneous_forward_procedure(self, visit_time_dict, generate_mat, init_vec, obs_para_dict):
         """
         in this function, we follow the settings we used in __homogeneous_forward_procedure
@@ -794,7 +814,7 @@ class ContinuousDiseaseProgressModel(object):
                     for j in range(self.__num_state):
                         if init_vec[j] == 0:
                             # for the case which is impossible, assign a very small value
-                            single_visit_procedure.append(-1000)
+                            single_visit_procedure.append(-10000000)
                         else:
                             single_visit_procedure.append(log(init_vec[j]))
                     forward_procedure_mat.append(single_visit_procedure)
@@ -823,7 +843,7 @@ class ContinuousDiseaseProgressModel(object):
                         # j is the previous state
                         transition_prob = transition_mat[k, j]
                         if transition_prob == 0 or transition_prob == 0.0:
-                            log_transition_prob = -1000
+                            log_transition_prob = -10000000
                         else:
                             log_transition_prob = log(transition_prob)
 
@@ -846,11 +866,11 @@ class ContinuousDiseaseProgressModel(object):
             # calculate the last prob
             single_visit_procedure = []
             single_obs_cache = list()
-            previous_visit_id = ordered_visit_time_dict[patient_id][-1][0]
+            last_visit_id = ordered_visit_time_dict[patient_id][-1][0]
             for k in range(self.__num_state):
                 # calculate log prob of observations
                 # find corresponding visit
-                obs_list = self.__obs_dict[patient_id][previous_visit_id]
+                obs_list = self.__obs_dict[patient_id][last_visit_id]
                 log_obs_prob = self.__log_observation_prob(hidden_state=k, obs_hyperparameters=obs_para_dict,
                                                            obs_list=obs_list)
                 single_obs_cache.append(log_obs_prob)
@@ -937,8 +957,11 @@ class ContinuousDiseaseProgressModel(object):
             candidate_state_list = self.__get_candidate_state_list(i)
             if len(candidate_state_list) != len(beta_mean_list[i]):
                 raise ValueError('')
-            for j, item in enumerate(candidate_state_list):
-                generate_mat[i, item] = beta_mean_list[i][j] * -1 * generate_mat[i, i]
+            if len(candidate_state_list) != 0:
+                for j, item in enumerate(candidate_state_list):
+                    generate_mat[i, item] = beta_mean_list[i][j] * -1 * generate_mat[i, i]
+            else:
+                generate_mat[i, i] = 0
 
         init_vec = np.zeros([num_state])
         for i, item in enumerate(phi_mean):
@@ -983,7 +1006,7 @@ class ContinuousDiseaseProgressModel(object):
                         log_prob = observation_log_prob_mat[k]
 
                         if init_vector[k] == 0:
-                            log_prob += -10000
+                            log_prob += -10000000
                         else:
                             log_prob += log(init_vector[k])
 
@@ -999,7 +1022,7 @@ class ContinuousDiseaseProgressModel(object):
                     for prev_state in range(num_state):
                         # To avoid the numerical unstable problem when we constraint the state transition direction
                         if transition_mat[prev_state, k] == 0:
-                            log_prob = -10000
+                            log_prob = -10000000
                         else:
                             log_prob = delta[j - 1, prev_state] + log(transition_mat[prev_state, k]) + \
                                        observation_log_prob_mat[k]
@@ -1374,13 +1397,15 @@ def save_mixture_of_last_visit(save_folder, last_visit_state_distribution, num_s
 
 
 def unit_test():
-    optimization_time = 10
-    likelihood_calculate_interval = 2
+    optimization_time = 30
+    likelihood_calculate_interval = 10
     limitation = None
-    num_state = 5
-    alpha = [1, 0.01]
+    num_state = 4
+    alpha = [1, 0.001]
     beta = 0.1
-    gamma_file_name = os.path.abspath('../../resource/特征先验.csv')
+    gamma_file_name = os.path.abspath('../../resource/特征先验_混合.csv')
+    data_file_name = \
+        os.path.abspath('../../resource/未预处理长期纵向数据_离散化_False_特别筛选_True_截断年份_2009.csv')
     gamma_dict = read_prior(gamma_file_name)
     phi = 0.1
     parallel_sampling_time = 1
@@ -1388,8 +1413,6 @@ def unit_test():
     backward_candidate = 0
     init_state_candidate = 3
 
-    data_file_name = \
-        os.path.abspath('../../resource/未预处理长期纵向数据_离散化_False_特别筛选_True_截断年份_2009.csv')
     obs_dict, visit_time_dict, index_name_dict = read_data(data_file_name, limitation=limitation)
 
     cdpm = ContinuousDiseaseProgressModel(obs_dict, visit_time_dict, index_name_dict,
@@ -1397,7 +1420,8 @@ def unit_test():
                                           alpha=alpha, beta=beta, gamma=gamma_dict, phi=phi,
                                           forward_candidate=forward_candidate, backward_candidate=backward_candidate,
                                           init_state_candidate=init_state_candidate)
-    cdpm.optimization(optimization_time, likelihood_calculate_interval=likelihood_calculate_interval, output_i_0=True)
+
+    cdpm.optimization(optimization_time, likelihood_calculate_interval=likelihood_calculate_interval)
     state_assignment = cdpm.disease_state_assignment(obs_dict=obs_dict, time_dict=visit_time_dict)
 
     now = datetime.datetime.now().strftime('%Y_%m_%d_%H_%M_%S')
