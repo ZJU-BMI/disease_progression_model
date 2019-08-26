@@ -10,11 +10,11 @@ from math import log, sqrt, exp
 
 
 class ContinuousDiseaseProgressModel(object):
-    def __init__(self, obs_dict, visit_time_dict, index_name_dict, parallel_sampling_time=1,
+    def __init__(self, obs_dict, visit_time_dict, index_name_dict, parallel_sampling_time=1, absorbing=True,
                  num_state=None, alpha=None, beta=None, gamma=None, forward_candidate=1, phi=None,
                  backward_candidate=0, init_state_candidate=None, reload_para_file_path=None):
         """
-        :param obs_dict:
+        :param obs_dict: observation_dict {patient: {visit_id: {index: value}}}
         :param visit_time_dict: {patient: {visit_id: time}}
         :param index_name_dict: to recover the name of observation given index
         :param num_state:number of hidden state
@@ -45,6 +45,7 @@ class ContinuousDiseaseProgressModel(object):
             self.__init_alpha = alpha
             self.__init_beta = beta
             self.__init_phi = phi
+            self.__absorbing = absorbing
             self.__init_gamma = gamma
             self.__parallel_sampling_time = parallel_sampling_time
             self.__forward_candidate = forward_candidate
@@ -70,13 +71,12 @@ class ContinuousDiseaseProgressModel(object):
 
         # init the mixture posterior set
         self.__mixture_posterior_set = dict()
-        self.__prior_set = None
         for i in range(parallel_sampling_time):
             alpha_vec, beta_vec, gamma_vec, phi_vec = self.__prior_vectorization(alpha, beta, gamma, phi)
             self.__mixture_posterior_set[i] = [alpha_vec, beta_vec, gamma_vec, phi_vec]
 
-            if i == 0:
-                self.__prior_set = [alpha_vec, beta_vec, gamma_vec, phi_vec]
+        alpha_vec, beta_vec, gamma_vec, phi_vec = self.__prior_vectorization(alpha, beta, gamma, phi)
+        self.__prior_set = [alpha_vec, beta_vec, gamma_vec, phi_vec]
         print('initial accomplished')
 
     def __prior_vectorization(self, alpha, beta, gamma, phi):
@@ -135,11 +135,13 @@ class ContinuousDiseaseProgressModel(object):
     def optimization(self, iteration, likelihood_calculate_interval=10):
         self.__iteration = iteration
         general_start_time = start_time = datetime.datetime.now()
+        avg_len = self.__average_state_stat()
+        print('average hidden states in a trajectory {} at start'.format(avg_len))
 
         # The Convergence of this optimization is proofed in
         # The Calculation of Posterior Distributions by Data Augmentation, Tanner, 1987
         for i in range(0, iteration):
-            if i == iteration or i % likelihood_calculate_interval == 0:
+            if i == iteration-1 or i % likelihood_calculate_interval == 0:
                 visit_time_dict = self.__visit_time_dict
                 log_likelihood = self.log_likelihood(visit_time_dict)
                 end_time = datetime.datetime.now()
@@ -160,9 +162,28 @@ class ContinuousDiseaseProgressModel(object):
             # Step 2, updating the mixture of posterior
             self.__posterior_distribution_update()
 
+            avg_len = self.__average_state_stat()
+            end_time = datetime.datetime.now()
+            time_cost = (end_time - start_time).seconds
+            print('average hidden states in a trajectory {} at iteration {}, time cost {} seconds'.
+                  format(avg_len, i, time_cost))
+
+            # start_time = datetime.datetime.now()
+
         general_end_time = datetime.datetime.now()
-        print('Task Time Cost: {} seconds'.format((general_end_time-general_start_time).seconds))
+        print('Optimization Time Cost: {} seconds'.format((general_end_time-general_start_time).seconds))
         print('optimization accomplished')
+
+    def __average_state_stat(self):
+        # for test usage
+        hidden_state_count = 0
+        count = 0
+        for parallel_index in self.__hidden_state:
+            for patient_index in self.__hidden_state[parallel_index]:
+                count += 1
+                hidden_state_count += len(self.__hidden_state[parallel_index][patient_index])
+        avg_len = hidden_state_count / count
+        return avg_len
 
     def __get_candidate_state_list(self, index):
         """
@@ -200,7 +221,11 @@ class ContinuousDiseaseProgressModel(object):
         generator_mat = np.zeros([num_state, num_state])
         alpha, beta, gamma, phi = prior_set
 
-        for i in range(len(generator_mat)):
+        if self.__absorbing:
+            len_ = len(generator_mat)-1
+        else:
+            len_ = len(generator_mat)
+        for i in range(len_):
             # sampling q_ii
             q_ii = np.random.gamma(alpha[0][i], alpha[1][i])
             generator_mat[i, i] = -q_ii
@@ -269,11 +294,6 @@ class ContinuousDiseaseProgressModel(object):
         new_hidden_state_dict = \
             self.__forward_filtering_backward_sampling(previous_hidden_state, poisson_events_dict, generator_mat,
                                                        init_state_prob, obs_hyperparameters, omega)
-        # for test usage
-        # hidden_state_count = 0
-        # for patient_id in new_hidden_state_dict:
-        #     hidden_state_count += len(new_hidden_state_dict[patient_id])
-        # print('average hidden states in a trajectory: {}'.format(hidden_state_count/len(new_hidden_state_dict)))
         return new_hidden_state_dict
 
     def __generating_poisson_event(self, previous_hidden_state, generator_mat, omega):
@@ -287,7 +307,7 @@ class ContinuousDiseaseProgressModel(object):
         poisson_event_dict = dict()
         for patient_id in visit_time:
             poisson_event_list = []
-            
+
             for i in range(len(previous_hidden_state[patient_id])):
                 markov_state_list = previous_hidden_state[patient_id]
                 start_time = markov_state_list[i][1]
@@ -298,7 +318,7 @@ class ContinuousDiseaseProgressModel(object):
                     end_time = markov_state_list[i+1][1]
                 hidden_state = markov_state_list[i][0]
                 r_t = omega + generator_mat[hidden_state, hidden_state]
-                
+
                 time = start_time
                 while time < end_time:
                     # expovariate generate the event time which follows Poisson process
@@ -310,6 +330,13 @@ class ContinuousDiseaseProgressModel(object):
                         poisson_event_list.append(time)
 
             poisson_event_dict[patient_id] = poisson_event_list
+        # hidden_state_count = 0
+        # count = 0
+        # for patient_index in poisson_event_dict:
+        #     count += 1
+        #     hidden_state_count += len(poisson_event_dict[patient_index])
+        # avg_len = hidden_state_count / count
+        # print('average Poisson state in a trajectory {}'.format(avg_len))
         return poisson_event_dict
 
     def __forward_filtering_backward_sampling(self, previous_hidden_state, poisson_events_dict, generator_mat,
@@ -335,9 +362,25 @@ class ContinuousDiseaseProgressModel(object):
         new_hidden_state_dict \
             = self.__hidden_state_resample(forward_procedure_dict, obs_hyperparameters, transition_mat,
                                            event_sequence_dict)
-
+        # hidden_state_count = 0
+        # count = 0
+        # for patient_index in new_hidden_state_dict:
+        #     count += 1
+        #     hidden_state_count += len(new_hidden_state_dict[patient_index])
+        # avg_len = hidden_state_count / count
+        # print('average un thinned hidden states in a trajectory {}'.format(avg_len))
         # discarding redundant event
         thined_hidden_state_dict = self.__updating_hidden_state(new_hidden_state_dict, event_sequence_dict)
+
+        # hidden_state_count = 0
+        # count = 0
+        # for patient_index in thined_hidden_state_dict:
+        #     count += 1
+        #    hidden_state_count += len(thined_hidden_state_dict[patient_index])
+        # avg_len = hidden_state_count / count
+        # print('average thinned hidden states in a trajectory {}'.format(avg_len))
+        # print('generator matrix')
+        # print(generator_mat)
 
         return thined_hidden_state_dict
 
@@ -366,7 +409,7 @@ class ContinuousDiseaseProgressModel(object):
 
     @staticmethod
     # checked
-    def __log_observation_prob(obs_list=None, hidden_state=None, obs_hyperparameters=None):
+    def __log_observation_prob(obs_list, hidden_state, obs_hyperparameters):
         """
         calculate the observation of given condition.
         :param hidden_state:
@@ -392,7 +435,7 @@ class ContinuousDiseaseProgressModel(object):
                 std = sqrt(obs_hyperparameters[index][hidden_state]['preset_variance'])
                 prob_density = normal.pdf(obs, mean, std)
                 if prob_density == 0:
-                    log_observation_prob += -400
+                    log_observation_prob += -500
                 else:
                     log_observation_prob += log(prob_density)
             else:
@@ -653,9 +696,21 @@ class ContinuousDiseaseProgressModel(object):
                 for i in range(len(hidden_state_list)-1):
                     current_state = hidden_state_list[i][0]
                     next_state = hidden_state_list[i+1][0]
-                    sojourn_time = hidden_state_list[i+1][1] - hidden_state_list[i][1]
                     single_transition_count[current_state, next_state] += 1
-                    single_sojourn_time[current_state] += sojourn_time
+
+                for i in range(len(hidden_state_list)):
+                    if i < len(hidden_state_list) - 1:
+                        current_state = hidden_state_list[i][0]
+                        sojourn_time = hidden_state_list[i + 1][1] - hidden_state_list[i][1]
+                        single_sojourn_time[current_state] += sojourn_time
+                    elif i == len(hidden_state_list) - 1:
+                        current_state = hidden_state_list[i][0]
+                        last_visit = self.__find_last_visit_id(patient)
+                        visit_time = self.__visit_time_dict[patient][last_visit]
+                        sojourn_time = visit_time - hidden_state_list[i][1]
+                        single_sojourn_time[current_state] += sojourn_time
+                    else:
+                        raise ValueError('')
 
                 # init state stat
                 single_init_state[hidden_state_list[0][0]] += 1
@@ -715,9 +770,9 @@ class ContinuousDiseaseProgressModel(object):
                             obs_sum = np.sum(data_list_one_state)
                             obs_len = len(data_list_one_state)
                             prior_mean, prior_variance, preset_variance = self.__prior_set[2][index][hidden_state][2:]
-                            posterior_variance = preset_variance
-                            variance_ = (prior_variance*preset_variance)/(preset_variance+obs_len*prior_variance)
-                            posterior_mean = variance_*(prior_mean/prior_variance + obs_sum/preset_variance)
+                            posterior_variance = (prior_variance*preset_variance) / \
+                                                 (preset_variance+obs_len*prior_variance)
+                            posterior_mean = posterior_variance*(prior_mean/prior_variance + obs_sum/preset_variance)
                             self.__mixture_posterior_set[parallel_index][2][index][hidden_state][2] = posterior_mean
                             self.__mixture_posterior_set[parallel_index][2][index][hidden_state][3] = posterior_variance
                 elif data_type == 'binomial':
@@ -792,7 +847,7 @@ class ContinuousDiseaseProgressModel(object):
         That is, the alpha_j(t) doesn't contain the current output
         """
 
-        # rearrange the visit time dict because the visit time dict is not ordered, which may cause problem
+        # rearrange the visit time dict because the visit time dict is not permitted ordered, which may cause problem
         ordered_visit_time_dict = dict()
         for patient_id in visit_time_dict:
             ordered_visit_list = list()
@@ -931,9 +986,12 @@ class ContinuousDiseaseProgressModel(object):
                 if gamma_set_list[0][feature_idx][hidden_state][1] == 'gaussian':
                     # the Variance of mixture of Gaussian is difficult to calculate.
                     # Therefore, we directly use the mean and variance of the first component
+                    gamma_mean_mu = 0
+                    for i in range(num_component):
+                        gamma_mean_mu += 1 / num_component * gamma_set_list[i][feature_idx][hidden_state][2]
                     gamma_mean = {'distribution': 'gaussian',
-                                  'sampled_mean': gamma_set_list[0][feature_idx][hidden_state][2],
-                                  'preset_variance': gamma_set_list[0][feature_idx][hidden_state][3]}
+                                  'sampled_mean': gamma_mean_mu,
+                                  'preset_variance': gamma_set_list[0][feature_idx][hidden_state][4]}
                 elif gamma_set_list[0][feature_idx][hidden_state][1] == 'binomial':
                     gamma_mean_prob = 0
                     for i in range(num_component):
@@ -952,7 +1010,11 @@ class ContinuousDiseaseProgressModel(object):
 
         # construct parameter
         generate_mat = np.zeros([num_state, num_state])
-        for i in range(num_state):
+        if self.__absorbing:
+            len_ = num_state-1
+        else:
+            len_ = num_state
+        for i in range(len_):
             generate_mat[i, i] = -1 * alpha_mean_list[i]
             candidate_state_list = self.__get_candidate_state_list(i)
             if len(candidate_state_list) != len(beta_mean_list[i]):
@@ -1397,8 +1459,8 @@ def save_mixture_of_last_visit(save_folder, last_visit_state_distribution, num_s
 
 
 def unit_test():
-    optimization_time = 30
-    likelihood_calculate_interval = 10
+    optimization_time = 150
+    likelihood_calculate_interval = 5
     limitation = None
     num_state = 4
     alpha = [1, 0.001]
@@ -1408,9 +1470,9 @@ def unit_test():
         os.path.abspath('../../resource/未预处理长期纵向数据_离散化_False_特别筛选_True_截断年份_2009.csv')
     gamma_dict = read_prior(gamma_file_name)
     phi = 0.1
-    parallel_sampling_time = 1
+    parallel_sampling_time = 8
     forward_candidate = 1
-    backward_candidate = 0
+    backward_candidate = 1
     init_state_candidate = 3
 
     obs_dict, visit_time_dict, index_name_dict = read_data(data_file_name, limitation=limitation)

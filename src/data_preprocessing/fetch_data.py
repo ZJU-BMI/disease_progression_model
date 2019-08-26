@@ -487,7 +487,7 @@ def get_vital_sign(visit_dict, data_path_dict, cache_root, read_from_cache=False
 
     # 构建数据模板
     vital_sign_dict = dict()
-    feature_list = ['血压Low', '血压high', '身高', '体重', '脉搏', 'BMI']
+    feature_list = ['血压Low', '血压high', '身高', '体重', 'BMI']
     for patient_id in visit_dict:
         vital_sign_dict[patient_id] = dict()
         for visit_id in visit_dict[patient_id]:
@@ -1210,7 +1210,7 @@ def reconstruct_data(visit_dict, visit_info_dict, procedure_dict, exam_dict, sex
 
 
 def extra_data_filter(data_dict, general_list):
-    # eliminate the visit that is not caused by heart failure
+    # eliminate the visit that are not diagnosed with hf
     for patient_id in data_dict:
         for visit_index in range(100):
             if data_dict[patient_id].__contains__(visit_index):
@@ -1343,7 +1343,7 @@ def get_special_intervention_info(visit_dict, data_path_dict, map_path, cache_ro
     return drug_dict
 
 
-def diuretic_history(visit_dict, medical_dict):
+def history_revise(visit_dict, medical_dict):
     diuretic_history_dict = dict()
     for patient_id in visit_dict:
         diuretic_history_dict[patient_id] = dict()
@@ -1428,7 +1428,7 @@ def main():
     echocardiogram_dict = get_echocardiogram(visit_dict, data_path_dict, ehcocardiogram_map_path, cache_root,
                                              read_from_cache=True)
     lab_test_dict = get_lab_test_info(visit_dict, data_path_dict, lab_test_list_path, cache_root,
-                                      read_from_cache=False)
+                                      read_from_cache=True)
     diagnosis_dict = get_diagnosis_info(visit_dict, data_path_dict, diagnosis_map_path, cache_root,
                                         read_from_cache=True)
     sex_dict, age_dict = get_demographic_info(visit_dict, data_path_dict, cache_root, read_from_cache=True)
@@ -1441,7 +1441,7 @@ def main():
                                                             read_from_cache=True)
     special_intervention_dict = get_special_intervention_info(visit_dict, data_path_dict, drug_map_path, cache_root,
                                                               read_from_cache=True)
-    diuretic_history_dict = diuretic_history(visit_dict, medical_dict)
+    diuretic_history_dict = history_revise(visit_dict, medical_dict)
     data_dict, general_list = reconstruct_data(visit_dict, visit_info_dict, operation_dict, echocardiogram_dict,
                                                sex_dict, age_dict, medical_dict, diagnosis_dict, vital_sign_dict,
                                                lab_test_dict, egfr_dict, special_intervention_dict,
