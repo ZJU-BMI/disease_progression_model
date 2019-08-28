@@ -1116,7 +1116,28 @@ def get_echocardiogram(visit_dict, data_path_dict, map_path, cache_root, read_fr
     return exam_dict
 
 
-def reconstruct_data(visit_dict, visit_info_dict, procedure_dict, exam_dict, sex_dict, age_dict, medical_dict,
+def chronic_disease_revise(diagnosis_dict, disease_list):
+    for patient_id in diagnosis_dict:
+        diagnosed_item_dict = dict()
+        for item in disease_list:
+            diagnosed_item_dict[item] = False
+
+        for i in range(100):
+            for visit_id in diagnosis_dict[patient_id]:
+                if int(visit_id) == i:
+                    for disease in diagnosed_item_dict:
+                        diagnosis_flag = diagnosis_dict[patient_id][visit_id][disease]
+                        if diagnosis_flag == '1' or diagnosis_flag == 1:
+                            diagnosed_item_dict[disease] = True
+                        elif diagnosis_flag == '0'or diagnosis_flag == 0:
+                            if diagnosed_item_dict[disease]:
+                                diagnosis_dict[patient_id][visit_id][disease] = '1'
+                        else:
+                            raise ValueError('')
+    return diagnosis_dict
+
+
+def reconstruct_data(visit_dict, visit_info_dict, procedure_dict, exam_dict, sex_dict, age_dict,
                      diagnosis_dict, vital_sign_dict, lab_test_dict, egfr_dict, special_intervention_dict,
                      cardiac_dysfunction_dict, diuretic_history_dict, labtest_binary):
     # 获取手术，检查，用药，诊断，关键指标，实验室检查的有序序列
@@ -1144,9 +1165,6 @@ def reconstruct_data(visit_dict, visit_info_dict, procedure_dict, exam_dict, sex
                 general_list.append(key)
             for key in exam_dict[patient_id][visit_id]:
                 exam_list.append(key)
-                general_list.append(key)
-            for key in medical_dict[patient_id][visit_id]:
-                medical_list.append(key)
                 general_list.append(key)
             for key in diagnosis_dict[patient_id][visit_id]:
                 diagnosis_list.append(key)
@@ -1198,8 +1216,6 @@ def reconstruct_data(visit_dict, visit_info_dict, procedure_dict, exam_dict, sex
                     target_dict[item] = lab_test_dict[patient_id][visit_id][item][1]
             for item in vital_sign_list:
                 target_dict[item] = vital_sign_dict[patient_id][visit_id][item]
-            for item in medical_list:
-                target_dict[item] = medical_dict[patient_id][visit_id][item]
             for item in special_intervention_list:
                 target_dict[item] = special_intervention_dict[patient_id][visit_id][item]
             for item in cardiac_dysfunction_list:
@@ -1223,6 +1239,8 @@ def extra_data_filter(data_dict, general_list):
                 continue
             if not (heart_failure_flag == 1 or heart_failure_flag == '1'):
                 data_dict[patient_id].pop(index)
+            else:
+                break
 
     eliminate_set = set()
     for patient_id in data_dict:
@@ -1419,6 +1437,7 @@ def main():
                       'lab_result', 'lab_test_items', 'lab_test_master', 'operation', 'operation_master',
                       'operation_name', 'orders', 'pat_master_index', 'pat_visit', 'vital_signs_rec']
     cache_root = os.path.abspath('../../resource/cache')
+    chronic_disease_list = ['高血压', '冠心病', '心肌梗死', '心肌病', '糖尿病', '心率失常', '肾病', '瓣膜病']
 
     data_path_dict = dict()
     for item in file_name_list:
@@ -1431,6 +1450,7 @@ def main():
                                       read_from_cache=True)
     diagnosis_dict = get_diagnosis_info(visit_dict, data_path_dict, diagnosis_map_path, cache_root,
                                         read_from_cache=True)
+    diagnosis_dict = chronic_disease_revise(diagnosis_dict, chronic_disease_list)
     sex_dict, age_dict = get_demographic_info(visit_dict, data_path_dict, cache_root, read_from_cache=True)
     visit_info_dict = get_visit_info(visit_dict, data_path_dict, cache_root, read_from_cache=True)
     operation_dict = get_procedure(visit_dict, data_path_dict, operation_map_path, cache_root, read_from_cache=True)
@@ -1443,7 +1463,7 @@ def main():
                                                               read_from_cache=True)
     diuretic_history_dict = history_revise(visit_dict, medical_dict)
     data_dict, general_list = reconstruct_data(visit_dict, visit_info_dict, operation_dict, echocardiogram_dict,
-                                               sex_dict, age_dict, medical_dict, diagnosis_dict, vital_sign_dict,
+                                               sex_dict, age_dict, diagnosis_dict, vital_sign_dict,
                                                lab_test_dict, egfr_dict, special_intervention_dict,
                                                cardiac_dysfunction_dict, diuretic_history_dict,
                                                labtest_binary=labtest_binary)
